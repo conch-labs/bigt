@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68.0", "setuptools-scm>=8.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bigt"
+version = "0.1.0"
+description = "Big terminal banners for workspace identification"
+requires-python = ">=3.9"
+dependencies = [
+    "pyfiglet>=1.0",
+    "colorama>=0.4",
+]
+
+[project.scripts]
+bigt = "bigt.cli:main"
+bigt-usaged = "bigt.usaged:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
