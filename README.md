@@ -75,6 +75,21 @@ bigt-usaged --stop       # stop the daemon
 
 The daemon auto-shuts down after 30 minutes of inactivity. On API failures it backs off exponentially (1m, 2m, 4m... up to 15m).
 
+## Recommended tmux config
+
+Add these to `~/.tmux.conf` for a better experience:
+
+```bash
+# Mouse support (scroll, click panes, resize)
+set -g mouse on
+
+# Copy/paste (macOS)
+set -s copy-command 'pbcopy'
+
+# Scroll history
+set -g history-limit 10000
+```
+
 ## License
 
 MIT
