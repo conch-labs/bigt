@@ -4,7 +4,7 @@ Big ASCII terminal banners with Claude Max usage meters.
 
 Designed to make it easy to tell your terminal windows apart when you have 20+ open. Runs in tmux with a banner pane on top and your shell below.
 
-![synthwave style](https://img.shields.io/badge/style-synthwave-ff00ff)
+![screenshot](assets/screenshot.png)
 
 ## Features
 
