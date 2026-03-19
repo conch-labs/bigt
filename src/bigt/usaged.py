@@ -1,4 +1,4 @@
-"""bigt usage daemon – fetches Claude usage every 4 min, serves via Unix socket."""
+"""bigt usage daemon – fetches Claude usage every 5 min, serves via Unix socket."""
 
 import argparse
 import json
@@ -15,8 +15,11 @@ from pathlib import Path
 CACHE_DIR = Path.home() / ".cache" / "bigt"
 SOCK_PATH = CACHE_DIR / "usage.sock"
 PID_PATH = CACHE_DIR / "usaged.pid"
-FETCH_INTERVAL = 240  # 4 minutes
+LOG_PATH = Path(__file__).resolve().parent.parent.parent / "usaged.log"
+FETCH_INTERVAL = 300  # 5 minutes
 IDLE_TIMEOUT = 1800   # 30 minutes
+BACKOFF_BASE = 60     # 1 minute base backoff
+BACKOFF_MAX = 900     # 15 minute max backoff
 
 # Reuse auth constants from usage module
 KEYCHAIN_SERVICE = "Claude Code-credentials"
@@ -39,7 +42,7 @@ def _get_oauth_token():
 
 
 def _do_fetch(token):
-    """Hit the Anthropic usage API. Returns parsed dict or None."""
+    """Hit the Anthropic usage API. Returns (data_dict, None) or (None, error_string)."""
     try:
         result = subprocess.check_output(
             [
@@ -54,10 +57,12 @@ def _do_fetch(token):
         )
         data = json.loads(result)
         if "error" in data:
-            return None
-        return data
-    except Exception:
-        return None
+            err = data["error"]
+            msg = f"{err.get('type', 'unknown')}: {err.get('message', 'no message')}"
+            return None, msg
+        return data, None
+    except Exception as e:
+        return None, str(e)
 
 
 class UsageDaemon:
@@ -68,10 +73,18 @@ class UsageDaemon:
         self.running = True
         self.foreground = foreground
         self.server_sock = None
+        self.consecutive_failures = 0
 
     def log(self, msg):
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        line = f"[{ts}] {msg}"
         if self.foreground:
             print(f"[usaged] {msg}", file=sys.stderr, flush=True)
+        try:
+            with open(LOG_PATH, "a") as f:
+                f.write(line + "\n")
+        except OSError:
+            pass
 
     def setup(self):
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -99,26 +112,38 @@ class UsageDaemon:
         self.log(f"received signal {signum}, shutting down")
         self.running = False
 
+    def _sleep(self, seconds):
+        """Sleep in 1s chunks so we can exit promptly."""
+        for _ in range(int(seconds)):
+            if not self.running:
+                return
+            time.sleep(1)
+
     def fetch_loop(self):
         """Background thread: fetch usage data every FETCH_INTERVAL seconds."""
         while self.running:
             token = _get_oauth_token()
             if token:
-                data = _do_fetch(token)
+                data, err = _do_fetch(token)
                 if data:
                     self.cached_data = data
                     self.fetched_at = time.time()
-                    self.log("fetched usage data")
+                    self.consecutive_failures = 0
+                    self.log("fetched usage data OK")
                 else:
-                    self.log("fetch failed (API error or no data)")
+                    self.consecutive_failures += 1
+                    self.log(f"fetch failed: {err}")
             else:
+                self.consecutive_failures += 1
                 self.log("no oauth token available")
 
-            # Sleep in small chunks so we can exit promptly
-            for _ in range(FETCH_INTERVAL):
-                if not self.running:
-                    return
-                time.sleep(1)
+            # On failure, use exponential backoff: 1m, 2m, 4m, 8m, capped at 15m
+            if self.consecutive_failures > 0:
+                backoff = min(BACKOFF_BASE * (2 ** (self.consecutive_failures - 1)), BACKOFF_MAX)
+                self.log(f"backing off {int(backoff)}s (failure #{self.consecutive_failures})")
+                self._sleep(backoff)
+            else:
+                self._sleep(FETCH_INTERVAL)
 
     def serve(self):
         """Main thread: accept client connections and serve cached data."""
