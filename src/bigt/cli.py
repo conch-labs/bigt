@@ -316,6 +316,162 @@ def get_random_scheme():
     return [random_module.choice(colors) for _ in range(6)]
 
 
+# ---------------------------------------------------------------------------
+# Matrix rain animation
+# ---------------------------------------------------------------------------
+
+# Green gradient from dark to bright — all greens, no white
+MATRIX_GREENS = [
+    "\033[38;5;22m",   # 0: very dark green
+    "\033[38;5;28m",   # 1: dark green
+    "\033[38;5;34m",   # 2: medium green
+    "\033[38;5;40m",   # 3: bright green
+    "\033[38;5;46m",   # 4: neon green
+    "\033[38;5;82m",   # 5: lime (brightest)
+]
+# Map from scheme color ANSI code → index in MATRIX_GREENS (for contrast calc)
+_SCHEME_TO_IDX = {
+    "\033[38;5;22m": 0, "\033[38;5;28m": 1, "\033[38;5;34m": 2,
+    "\033[38;5;40m": 3, "\033[38;5;46m": 4, "\033[38;5;82m": 5,
+}
+RESET = Style.RESET_ALL
+
+# Random glyphs for the rain effect — katakana, symbols, digits
+MATRIX_GLYPHS = list(
+    "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ"
+    "01234567890"
+    "ﾞﾟ@#$%&=+<>:;~"
+)
+
+
+class MatrixRain:
+    """Manages matrix rain drops with front/behind layering for 3D effect."""
+
+    def __init__(self, width, height, density=0.45):
+        self.width = width
+        self.height = height
+        self.density = density
+        # Each drop: [column, head_row (float), speed, tail_length, layer]
+        # layer: "front" = renders over block chars, "behind" = only in spaces
+        self.drops = []
+        self._spawn_initial()
+
+    def _spawn_initial(self):
+        num_drops = max(8, int(self.width * self.density))
+        for _ in range(num_drops):
+            self.drops.append(self._new_drop(random_start=True))
+
+    def _new_drop(self, random_start=False):
+        col = random_module.randint(0, self.width - 1)
+        speed = random_module.uniform(2.0, 5.0)
+        # Tail spans most/all of the banner height so the stream is visible top-to-bottom
+        tail = random_module.randint(max(2, self.height - 2), self.height)
+        # ~40% of drops go in front, ~60% behind for depth
+        layer = "front" if random_module.random() < 0.4 else "behind"
+        # Behind drops are slower for parallax feel
+        if layer == "behind":
+            speed *= 0.6
+        if random_start:
+            # Stagger start positions above the banner so they trickle in
+            row = random_module.uniform(-tail - self.height, -0.5)
+        else:
+            row = random_module.uniform(-tail - 2, -0.5)
+        return [col, row, speed, tail, layer]
+
+    def advance(self, dt):
+        alive = []
+        for drop in self.drops:
+            drop[1] += drop[2] * dt
+            # Only remove once the entire tail has passed below the banner
+            if drop[1] - drop[3] < self.height:
+                alive.append(drop)
+        self.drops = alive
+
+        target = max(8, int(self.width * self.density))
+        while len(self.drops) < target:
+            self.drops.append(self._new_drop())
+
+    def get_effect_at(self, row, col, is_solid):
+        """Check if a rain drop affects this position.
+
+        Args:
+            row, col: position in the banner
+            is_solid: True if the original char is a block char (not a space)
+
+        Returns (brightness_index, glyph, layer) or None.
+        """
+        best = -1
+        best_layer = None
+        for drop_col, head_row, _, tail, layer in self.drops:
+            if drop_col != col:
+                continue
+            if layer == "front" and not is_solid:
+                continue
+            if layer == "behind" and is_solid:
+                continue
+            head_int = int(round(head_row))
+            if row > head_int or row < head_int - tail:
+                continue
+            dist = head_int - row
+            brightness = len(MATRIX_GREENS) - 1 - int(dist * len(MATRIX_GREENS) / (tail + 1))
+            brightness = max(0, min(len(MATRIX_GREENS) - 1, brightness))
+            # Behind drops cap dimmer for depth
+            if layer == "behind":
+                brightness = min(brightness, len(MATRIX_GREENS) - 3)
+            if brightness > best:
+                best = brightness
+                best_layer = layer
+        if best >= 0:
+            glyph = random_module.choice(MATRIX_GLYPHS)
+            return best, glyph, best_layer
+        return None
+
+
+def _contrast_color(drop_brightness, base_color):
+    """Pick a rain glyph color that contrasts with the underlying block color.
+
+    On spaces (black bg), use the drop brightness directly.
+    On solid blocks, invert relative to the base row color so the glyph
+    visually pops — bright rain on dark rows, dim rain on bright rows.
+    """
+    base_idx = _SCHEME_TO_IDX.get(base_color)
+    if base_idx is None:
+        return MATRIX_GREENS[drop_brightness]
+    # Flip: if base is dark (0), rain should be bright (5), and vice versa
+    max_idx = len(MATRIX_GREENS) - 1
+    inverted = max_idx - base_idx
+    # Blend the drop's own brightness with the inverted base for variety
+    # Tip (high brightness) pulls toward inverted, tail pulls toward dark
+    blended = int(inverted * (drop_brightness / max_idx))
+    blended = max(0, min(max_idx, blended))
+    return MATRIX_GREENS[blended]
+
+
+def render_rain_frame(lines, rain, scheme_colors):
+    """Render one frame with front/behind rain layering for 3D depth."""
+    colored_lines = []
+    for row, line in enumerate(lines):
+        base_color = scheme_colors[row % len(scheme_colors)]
+        buf = []
+        for col, ch in enumerate(line):
+            is_solid = ch != ' '
+            effect = rain.get_effect_at(row, col, is_solid)
+            if effect:
+                brightness, glyph, layer = effect
+                if layer == "front":
+                    # Contrast against the row's base green
+                    color = _contrast_color(brightness, base_color)
+                else:
+                    # Behind drops on black bg — use brightness directly
+                    color = MATRIX_GREENS[brightness]
+                buf.append(f"{color}{glyph}")
+            else:
+                buf.append(f"{base_color}{ch}")
+        buf.append(RESET)
+        colored_lines.append("".join(buf))
+    return colored_lines
+
+
 # Custom block character font (6 rows per glyph)
 BLOCK_FONT = {
     'A': [' █████╗ ', '██╔══██╗', '███████║', '██╔══██║', '██║  ██║', '╚═╝  ╚═╝'],
@@ -468,13 +624,47 @@ def list_fonts():
         print("  %s" % f)
 
 
-def run_tmux_top_pane(text, scheme, scale, refresh):
-    """Render banner + usage in a loop (meant for tmux top pane)."""
+def run_tmux_top_pane(text, scheme, scale, refresh, rain_mode="off"):
+    """Render banner + usage in a loop (meant for tmux top pane).
+
+    Args:
+        rain_mode: "off", "continuous", or number of minutes for pomodoro interval
+    """
     import time
     from .usage import render_usage_line
 
     # Target height: text rows + 2 borders + 2 info lines
     target_height = {1: 11, 2: 13, 3: 15}.get(scale, 11)
+
+    # Pre-render the raw lines once
+    lines = render_block_text(text, scale=scale)
+    max_width = max(len(line) for line in lines) if lines else 40
+    border_color = Fore.GREEN if scheme == "matrix" else Fore.MAGENTA
+
+    # Determine colors
+    if scheme == "random":
+        scheme_colors = get_random_scheme()
+    elif scheme in COLOR_SCHEMES:
+        scheme_colors = COLOR_SCHEMES[scheme]
+    else:
+        scheme_colors = COLOR_SCHEMES["synthwave"]
+
+    # Rain setup
+    rain = None
+    rain_continuous = rain_mode == "continuous"
+    rain_interval = 0  # seconds between pomodoro rain bursts
+    rain_duration = 15  # seconds per burst
+    rain_active = False
+    rain_burst_start = 0
+
+    if rain_continuous:
+        rain = MatrixRain(max_width, len(lines))
+        rain_active = True
+    elif rain_mode not in ("off", "continuous"):
+        try:
+            rain_interval = float(rain_mode) * 60  # minutes to seconds
+        except ValueError:
+            rain_interval = 0
 
     # Track whether we need to re-render (on SIGWINCH or timer)
     needs_render = [True]
@@ -488,14 +678,29 @@ def run_tmux_top_pane(text, scheme, scale, refresh):
     sys.stdout.write("\033[?25l")
     sys.stdout.flush()
 
-    def render():
-        # Resize pane to target height
+    def render_static():
+        """Render static (non-animated) banner."""
+        sys.stdout.write("\033[2J\033[H")
+        # Resize pane
         subprocess.run(
             ["tmux", "resize-pane", "-t", "0", "-y", str(target_height)],
             capture_output=True,
         )
-        sys.stdout.write("\033[2J\033[H")  # Clear pane
         display_synthwave_text(text, scheme=scheme, scale=scale)
+        _print_info_lines()
+
+    def render_rain_banner():
+        """Render one rain animation frame (cursor moves to home, overwrites)."""
+        sys.stdout.write("\033[H")  # Move to top, don't clear (reduces flicker)
+        colored_lines = render_rain_frame(lines, rain, scheme_colors)
+        print(f"{border_color}╔{'═' * (max_width + 2)}╗")
+        for line in colored_lines:
+            # Pad to max_width to overwrite previous frame
+            print(f"{border_color}║{RESET} {line} {border_color}║{RESET}")
+        print(f"{border_color}╚{'═' * (max_width + 2)}╝")
+        _print_info_lines()
+
+    def _print_info_lines():
         home = os.path.expanduser("~")
         cwd = os.getcwd()
         smart_cwd = cwd.replace(home, "~", 1) if cwd.startswith(home) else cwd
@@ -505,13 +710,50 @@ def run_tmux_top_pane(text, scheme, scale, refresh):
 
     try:
         last_render = 0
+        last_burst_trigger = time.time()
+        last_frame = 0
+
+        # Initial render
+        subprocess.run(
+            ["tmux", "resize-pane", "-t", "0", "-y", str(target_height)],
+            capture_output=True,
+        )
+        render_static()
+        last_render = time.time()
+
         while True:
             now = time.time()
-            if needs_render[0] or (now - last_render >= refresh):
-                render()
-                needs_render[0] = False
-                last_render = now
-            time.sleep(0.5)
+
+            # Check pomodoro trigger
+            if rain_interval > 0 and not rain_active:
+                if now - last_burst_trigger >= rain_interval:
+                    rain = MatrixRain(max_width, len(lines))
+                    rain_active = True
+                    rain_burst_start = now
+                    last_burst_trigger = now
+
+            # End pomodoro burst
+            if rain_active and not rain_continuous and rain_interval > 0:
+                if now - rain_burst_start >= rain_duration:
+                    rain_active = False
+                    rain = None
+                    render_static()
+                    last_render = now
+
+            if rain_active and rain:
+                # Animate at ~10fps
+                dt = now - last_frame if last_frame else 0.1
+                last_frame = now
+                rain.advance(dt)
+                render_rain_banner()
+                time.sleep(0.1)
+            else:
+                # Static mode - refresh on timer or resize
+                if needs_render[0] or (now - last_render >= refresh):
+                    render_static()
+                    needs_render[0] = False
+                    last_render = now
+                time.sleep(0.5)
     except KeyboardInterrupt:
         pass
     finally:
@@ -519,7 +761,7 @@ def run_tmux_top_pane(text, scheme, scale, refresh):
         sys.stdout.flush()
 
 
-def launch_tmux(text, scheme, scale, refresh, project_path):
+def launch_tmux(text, scheme, scale, refresh, project_path, rain_mode="off"):
     """Launch a tmux session with banner+usage top pane and shell bottom."""
     project_path = os.path.abspath(project_path)
     # tmux session names can't have periods — replace with underscores
@@ -536,8 +778,9 @@ def launch_tmux(text, scheme, scale, refresh, project_path):
 
     # Build the top pane command - re-invoke bigt with --_tmux-top (internal flag)
     bigt_cmd = sys.argv[0]
+    rain_flag = f" --rain {rain_mode}" if rain_mode != "off" else ""
     top_cmd = (
-        f"{bigt_cmd} {text} -s {scheme} --refresh {refresh} --_tmux-top"
+        f"{bigt_cmd} {text} -s {scheme} --refresh {refresh}{rain_flag} --_tmux-top"
     )
 
     # Determine top pane height based on scale: text rows + 2 borders + 2 info lines
@@ -600,6 +843,8 @@ def main():
     parser.add_argument("--no-tmux", action="store_true", help="Disable tmux, use legacy persistent shell mode")
     parser.add_argument("--usage", action="store_true", help="Show Claude Max plan usage")
     parser.add_argument("--refresh", type=int, default=120, help="Refresh interval for tmux top pane (default: 120s)")
+    parser.add_argument("--rain", default=None, nargs="?", const="continuous", metavar="MINUTES",
+                       help="Matrix rain animation. Use alone for continuous, or set minutes for pomodoro bursts (e.g. --rain 25). Saveable via --set-default")
     parser.add_argument("--_tmux-top", dest="tmux_top", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--help", action="help", help="Show this help message and exit")
 
@@ -611,8 +856,12 @@ def main():
 
     if args.set_default:
         config["scheme"] = args.set_default
+        if args.rain is not None:
+            config["rain"] = args.rain
         save_config(config)
         print(f"Default scheme set to: {args.set_default}")
+        if args.rain is not None:
+            print(f"Default rain set to: {args.rain}")
         print(f"Config saved to: {CONFIG_PATH}")
         return
 
@@ -646,9 +895,12 @@ def main():
 
     text = " ".join(text_parts) if text_parts else "BigT"
 
+    # Determine rain mode: CLI flag > config > off
+    rain_mode = args.rain if args.rain is not None else config.get("rain", "off")
+
     # tmux top pane mode (internal - called by launch_tmux)
     if args.tmux_top:
-        run_tmux_top_pane(text, scheme, scale, args.refresh)
+        run_tmux_top_pane(text, scheme, scale, args.refresh, rain_mode=rain_mode)
         return
 
     if args.interactive:
@@ -681,7 +933,7 @@ def main():
 
     # Default: tmux mode (banner + usage top pane, shell bottom pane)
     tmux_path = args.tmux if args.tmux is not None else "."
-    launch_tmux(text, scheme, scale, args.refresh, tmux_path)
+    launch_tmux(text, scheme, scale, args.refresh, tmux_path, rain_mode=rain_mode)
 
 
 if __name__ == "__main__":
