@@ -1,6 +1,7 @@
 """BigT - Big terminal banners for workspace identification."""
 
 import argparse
+import json
 import os
 import shutil
 import signal
@@ -8,11 +9,28 @@ import subprocess
 import sys
 import termios
 import tty
+from pathlib import Path
 
 import pyfiglet
 from colorama import Fore, Style, init
 
 init()
+
+CONFIG_PATH = Path.home() / ".bigt" / "config.json"
+
+
+def load_config():
+    """Load user config from ~/.bigt/config.json."""
+    try:
+        return json.loads(CONFIG_PATH.read_text())
+    except Exception:
+        return {}
+
+
+def save_config(config):
+    """Save user config to ~/.bigt/config.json."""
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CONFIG_PATH.write_text(json.dumps(config, indent=2) + "\n")
 
 # Color map for --color flag
 COLORS = {
@@ -191,11 +209,12 @@ def run_persistent_synthwave(text, color, shell, scheme="synthwave", scale=1):
     sys.stdout.write("\033[2J")
     sys.stdout.write("\033[H")
 
-    # Print synthwave banner (compact)
-    print(f"{Fore.MAGENTA}╔{'═' * (max_width + 2)}╗")
+    # Print banner (compact)
+    border_color = Fore.GREEN if scheme == "matrix" else Fore.MAGENTA
+    print(f"{border_color}╔{'═' * (max_width + 2)}╗")
     for line in colored_lines:
-        print(f"{Fore.MAGENTA}║{Fore.RESET} {line} {Fore.MAGENTA}║{Fore.RESET}")
-    print(f"{Fore.MAGENTA}╚{'═' * (max_width + 2)}╝")
+        print(f"{border_color}║{Fore.RESET} {line} {border_color}║{Fore.RESET}")
+    print(f"{border_color}╚{'═' * (max_width + 2)}╝")
 
     sys.stdout.write("%s%s%s\n" % (dim, sep, Style.RESET_ALL))
 
@@ -284,6 +303,7 @@ COLOR_SCHEMES = {
     "forest": [Fore.GREEN, Fore.LIGHTGREEN_EX, Fore.GREEN, Fore.LIGHTGREEN_EX, Fore.GREEN, Fore.LIGHTGREEN_EX],
     "pastel": [Fore.LIGHTCYAN_EX, Fore.LIGHTGREEN_EX, Fore.LIGHTMAGENTA_EX, Fore.LIGHTYELLOW_EX, Fore.LIGHTCYAN_EX, Fore.LIGHTGREEN_EX],
     "purple": [Fore.MAGENTA, Fore.LIGHTMAGENTA_EX, Fore.MAGENTA, Fore.LIGHTMAGENTA_EX, Fore.MAGENTA, Fore.LIGHTMAGENTA_EX],
+    "matrix": ["\033[38;5;22m", "\033[38;5;28m", "\033[38;5;34m", "\033[38;5;40m", "\033[38;5;46m", "\033[38;5;82m"],
 }
 
 import random as random_module
@@ -375,7 +395,7 @@ def display_synthwave_text(text, color="cyan", scheme="synthwave", scale=1):
     Args:
         text: Text to display
         color: Single color override (overrides scheme)
-        scheme: Color scheme name (synthwave, cyberpunk, ocean, fire, forest, pastel, purple, random)
+        scheme: Color scheme name (synthwave, cyberpunk, ocean, fire, forest, pastel, purple, matrix, random)
         scale: Height scale factor (1-3)
     """
     # Render using block character font
@@ -398,11 +418,12 @@ def display_synthwave_text(text, color="cyan", scheme="synthwave", scale=1):
     # Calculate width for border
     max_width = max(len(line) for line in lines) if lines else 40
 
-    # Print with synthwave border (compact - no empty padding rows)
-    print(f"{Fore.MAGENTA}╔{'═' * (max_width + 2)}╗")
+    # Print with border (compact - no empty padding rows)
+    border_color = Fore.GREEN if scheme == "matrix" else Fore.MAGENTA
+    print(f"{border_color}╔{'═' * (max_width + 2)}╗")
     for line in colored_lines:
-        print(f"{Fore.MAGENTA}║{Fore.RESET} {line} {Fore.MAGENTA}║{Fore.RESET}")
-    print(f"{Fore.MAGENTA}╚{'═' * (max_width + 2)}╝")
+        print(f"{border_color}║{Fore.RESET} {line} {border_color}║{Fore.RESET}")
+    print(f"{border_color}╚{'═' * (max_width + 2)}╝")
 
 
 def display_bigt_banner():
@@ -478,7 +499,7 @@ def run_tmux_top_pane(text, scheme, scale, refresh):
         home = os.path.expanduser("~")
         cwd = os.getcwd()
         smart_cwd = cwd.replace(home, "~", 1) if cwd.startswith(home) else cwd
-        print(f"  {render_usage_line()}")
+        print(f"  {render_usage_line(scheme=scheme)}")
         print(f"  {Style.DIM}{time.strftime('%H:%M:%S')}  {smart_cwd}{Style.RESET_ALL}")
         sys.stdout.flush()
 
@@ -541,7 +562,9 @@ def launch_tmux(text, scheme, scale, refresh, project_path):
     # Session options
     subprocess.run(["tmux", "set-option", "-t", session_name, "mouse", "on"],
                    capture_output=True)
-    subprocess.run(["tmux", "set-option", "-t", session_name, "status-style", "bg=black,fg=cyan"],
+    tmux_fg_colors = {"matrix": "green", "fire": "red", "purple": "magenta", "ocean": "cyan", "forest": "green"}
+    tmux_fg = tmux_fg_colors.get(scheme, "cyan")
+    subprocess.run(["tmux", "set-option", "-t", session_name, "status-style", f"bg=black,fg={tmux_fg}"],
                    capture_output=True)
     subprocess.run(["tmux", "set-option", "-t", session_name, "status-left", f" {text} "],
                    capture_output=True)
@@ -561,8 +584,11 @@ def main():
     parser.add_argument("text", nargs="*", default=["BigT"], help="Text to display (default: BigT). Use + for size 2, ++ for size 3")
     parser.add_argument("-c", "--color", default="cyan", choices=COLORS.keys(), help="Text color (default: cyan)")
     parser.add_argument("-s", "--scheme", default=None,
-                       choices=["synthwave", "cyberpunk", "ocean", "fire", "forest", "pastel", "purple", "random"],
-                       help="Color scheme (default: synthwave)")
+                       choices=["synthwave", "cyberpunk", "ocean", "fire", "forest", "pastel", "purple", "matrix", "random"],
+                       help="Color scheme (default from ~/.bigt/config.json)")
+    parser.add_argument("--set-default", default=None,
+                       choices=["synthwave", "cyberpunk", "ocean", "fire", "forest", "pastel", "purple", "matrix"],
+                       help="Set default color scheme in ~/.bigt/config.json")
     parser.add_argument("-i", "--interactive", action="store_true", help="Interactive font picker (old figlet style)")
     parser.add_argument("--no-persist", action="store_true", help="Just print the banner and exit")
     parser.add_argument("--shell", default=None, help="Shell to use in persist mode (default: $SHELL)")
@@ -579,9 +605,21 @@ def main():
 
     args = parser.parse_args()
 
+    # Load config for defaults
+    config = load_config()
+    config_scheme = config.get("scheme", "synthwave")
+
+    if args.set_default:
+        config["scheme"] = args.set_default
+        save_config(config)
+        print(f"Default scheme set to: {args.set_default}")
+        print(f"Config saved to: {CONFIG_PATH}")
+        return
+
     if args.usage:
         from .usage import render_usage_full
-        render_usage_full()
+        scheme = args.scheme if args.scheme else config_scheme
+        render_usage_full(scheme=scheme)
         return
 
     if args.themes:
@@ -595,7 +633,7 @@ def main():
     # Parse text and extract size modifier
     text_parts = args.text
     scale = 1  # Default size
-    scheme = args.scheme if args.scheme else "synthwave"  # Default to synthwave scheme
+    scheme = args.scheme if args.scheme else config_scheme
 
     # Check if last element is a size modifier (+ or ++)
     if text_parts and len(text_parts[-1]) > 0 and all(c == '+' for c in text_parts[-1]):

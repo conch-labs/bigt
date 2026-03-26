@@ -177,7 +177,7 @@ def time_remaining(reset_at):
         return "--"
 
 
-def draw_bar(pct, width=15):
+def draw_bar(pct, width=15, scheme=None):
     """Return a colored progress bar string."""
     pct = int(pct)
     filled = pct * width // 100
@@ -187,6 +187,14 @@ def draw_bar(pct, width=15):
         color = Fore.RED
     elif pct >= 60:
         color = Fore.YELLOW
+    elif scheme == "matrix":
+        color = Fore.GREEN
+    elif scheme == "ocean":
+        color = Fore.CYAN
+    elif scheme == "fire":
+        color = Fore.RED
+    elif scheme == "purple":
+        color = Fore.MAGENTA
     else:
         color = Fore.BLUE
 
@@ -194,7 +202,7 @@ def draw_bar(pct, width=15):
     return f"{bar} {pct:3d}%"
 
 
-def render_usage_line():
+def render_usage_line(scheme=None):
     """Fetch usage and return a single formatted line for display."""
     token = get_oauth_token()
     if not token:
@@ -219,14 +227,14 @@ def render_usage_line():
     sonnet_reset = time_remaining(sonnet.get("resets_at", ""))
 
     parts = [
-        f"{Style.DIM}Sess{Style.RESET_ALL} {draw_bar(five_pct)} {Style.DIM}{five_reset}{Style.RESET_ALL}",
-        f"{Style.DIM}Wkly{Style.RESET_ALL} {draw_bar(seven_pct)} {Style.DIM}{seven_reset}{Style.RESET_ALL}",
-        f"{Style.DIM}Son{Style.RESET_ALL} {draw_bar(sonnet_pct)} {Style.DIM}{sonnet_reset}{Style.RESET_ALL}",
+        f"{Style.DIM}Sess{Style.RESET_ALL} {draw_bar(five_pct, scheme=scheme)} {Style.DIM}{five_reset}{Style.RESET_ALL}",
+        f"{Style.DIM}Wkly{Style.RESET_ALL} {draw_bar(seven_pct, scheme=scheme)} {Style.DIM}{seven_reset}{Style.RESET_ALL}",
+        f"{Style.DIM}Son{Style.RESET_ALL} {draw_bar(sonnet_pct, scheme=scheme)} {Style.DIM}{sonnet_reset}{Style.RESET_ALL}",
     ]
     return "  ".join(parts)
 
 
-def render_usage_full():
+def render_usage_full(scheme=None):
     """Render a full multi-line usage display."""
     token = get_oauth_token()
     if not token:
@@ -246,12 +254,16 @@ def render_usage_full():
     sonnet = data.get("seven_day_sonnet") or {}
     extra = data.get("extra_usage") or {}
 
+    # Theme-aware header color
+    header_colors = {"matrix": Fore.GREEN, "fire": Fore.RED, "purple": Fore.MAGENTA, "ocean": Fore.CYAN}
+    header_color = header_colors.get(scheme, Fore.CYAN)
+
     print()
-    print(f"  {Style.BRIGHT}{Fore.CYAN}Claude Max Usage{Style.RESET_ALL}")
+    print(f"  {Style.BRIGHT}{header_color}Claude Max Usage{Style.RESET_ALL}")
     print()
-    print(f"  Session (5hr)  {draw_bar(five.get('utilization', 0) or 0, 30)}  {Style.DIM}{time_remaining(five.get('resets_at', ''))}{Style.RESET_ALL}")
-    print(f"  Weekly (all)   {draw_bar(seven.get('utilization', 0) or 0, 30)}  {Style.DIM}{time_remaining(seven.get('resets_at', ''))}{Style.RESET_ALL}")
-    print(f"  Weekly (Son)   {draw_bar(sonnet.get('utilization', 0) or 0, 30)}  {Style.DIM}{time_remaining(sonnet.get('resets_at', ''))}{Style.RESET_ALL}")
+    print(f"  Session (5hr)  {draw_bar(five.get('utilization', 0) or 0, 30, scheme=scheme)}  {Style.DIM}{time_remaining(five.get('resets_at', ''))}{Style.RESET_ALL}")
+    print(f"  Weekly (all)   {draw_bar(seven.get('utilization', 0) or 0, 30, scheme=scheme)}  {Style.DIM}{time_remaining(seven.get('resets_at', ''))}{Style.RESET_ALL}")
+    print(f"  Weekly (Son)   {draw_bar(sonnet.get('utilization', 0) or 0, 30, scheme=scheme)}  {Style.DIM}{time_remaining(sonnet.get('resets_at', ''))}{Style.RESET_ALL}")
     print()
 
     if extra.get("is_enabled"):
