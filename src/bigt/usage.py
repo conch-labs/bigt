@@ -20,15 +20,25 @@ SOCK_PATH = Path.home() / ".cache" / "bigt" / "usage.sock"
 PID_PATH = Path.home() / ".cache" / "bigt" / "usaged.pid"
 
 
+CREDENTIALS_FILE = Path.home() / ".claude" / ".credentials.json"
+
+
 def get_oauth_token():
-    """Read Claude Code OAuth token from macOS Keychain."""
+    """Read Claude Code OAuth token from macOS Keychain, or ~/.claude/.credentials.json on Linux."""
+    if sys.platform == "darwin":
+        try:
+            raw = subprocess.check_output(
+                ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"],
+                stderr=subprocess.DEVNULL,
+                text=True,
+            ).strip()
+            creds = json.loads(raw)
+            return creds["claudeAiOauth"]["accessToken"]
+        except Exception:
+            return None
+
     try:
-        raw = subprocess.check_output(
-            ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"],
-            stderr=subprocess.DEVNULL,
-            text=True,
-        ).strip()
-        creds = json.loads(raw)
+        creds = json.loads(CREDENTIALS_FILE.read_text())
         return creds["claudeAiOauth"]["accessToken"]
     except Exception:
         return None
