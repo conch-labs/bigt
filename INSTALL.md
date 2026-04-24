@@ -2,12 +2,17 @@
 
 ## Requirements
 
-- macOS (the usage meter relies on the macOS Keychain)
+- macOS or Linux
 - Python 3.9+
 - [tmux](https://github.com/tmux/tmux) — required for the default launch mode
 - [WezTerm](https://wezfurlong.org/wezterm/) — recommended terminal
 
+The Claude usage meter reads its OAuth token from the macOS Keychain on
+macOS, and from `~/.claude/.credentials.json` on Linux.
+
 ## Step 1: Install system dependencies
+
+macOS:
 
 ```bash
 brew install tmux
@@ -15,6 +20,14 @@ brew install --cask wezterm
 ```
 
 > If you don't have Homebrew: https://brew.sh
+
+Linux (Debian/Ubuntu):
+
+```bash
+sudo apt install tmux
+```
+
+WezTerm on Linux: see https://wezfurlong.org/wezterm/install/linux.html
 
 ## Step 2: Install bigt
 
