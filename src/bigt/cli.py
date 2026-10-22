@@ -821,7 +821,7 @@ def launch_tmux(text, scheme, scale, refresh, project_path, rain_mode="off"):
 def main():
     parser = argparse.ArgumentParser(
         prog="bigt",
-        description="Display big ASCII art banners in synthwave style. Persists with shell by default.",
+        description="Display big ASCII art banners. Persists with shell by default.",
         add_help=False,
     )
     parser.add_argument("text", nargs="*", default=["BigT"], help="Text to display (default: BigT). Use + for size 2, ++ for size 3")
@@ -852,7 +852,7 @@ def main():
 
     # Load config for defaults
     config = load_config()
-    config_scheme = config.get("scheme", "synthwave")
+    config_scheme = config.get("scheme", "matrix")
 
     if args.set_default:
         config["scheme"] = args.set_default

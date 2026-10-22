@@ -8,8 +8,8 @@ Designed to make it easy to tell your terminal windows apart when you have 20+ o
 
 ## Features
 
-- Custom block-character font with synthwave color gradients
-- 7 built-in color schemes (synthwave, cyberpunk, ocean, fire, forest, pastel, purple)
+- Custom block-character font with color gradients
+- 8 built-in color schemes (matrix, synthwave, cyberpunk, ocean, fire, forest, pastel, purple)
 - 3 size levels: normal, `+`, `++`
 - Claude Max usage meter (session, weekly, sonnet limits with progress bars)
 - Usage daemon (`bigt-usaged`) polls the API once every 5 minutes so multiple terminals share a single data source
@@ -39,7 +39,7 @@ pip install .
 ## Usage
 
 ```bash
-bigt "my project"              # default synthwave banner + shell in tmux
+bigt "my project"              # default matrix banner + shell in tmux
 bigt "my project" +            # medium size
 bigt "my project" ++           # large size
 bigt "my project" -s fire      # fire color scheme

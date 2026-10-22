@@ -49,7 +49,7 @@ pip install .
 bigt "your project name"
 ```
 
-This opens a tmux session with a big synthwave banner at the top and a shell below.
+This opens a tmux session with a big matrix banner at the top and a shell below.
 
 ---
 
@@ -62,10 +62,10 @@ If you have [Claude Code](https://claude.ai/code) installed and are logged in, b
 ## Quick usage
 
 ```bash
-bigt "my project"         # default synthwave style
+bigt "my project"         # default matrix style
 bigt "my project" +       # bigger
 bigt "my project" ++      # biggest
-bigt "my project" -s fire # different color scheme (synthwave, cyberpunk, ocean, fire, forest, pastel, purple)
+bigt "my project" -s fire # different color scheme (matrix, synthwave, cyberpunk, ocean, fire, forest, pastel, purple)
 bigt "my project" --no-persist  # just print the banner and exit
 bigt --themes             # preview all color schemes
 ```
